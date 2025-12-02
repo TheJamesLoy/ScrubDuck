@@ -1,0 +1,22 @@
+#Python artifacts
+pycache/
+*.pyc
+*.pyo
+*.pyd
+
+#Virtual Environment (Very Important!)
+venv/
+env/
+.env
+
+# VS Code settings
+.vscode/
+
+#Project specific
+vscode-extension/out/
+vscode-extension/node_modules/
+*.vsix
+.DS_Store
+
+#Logs
+*.log

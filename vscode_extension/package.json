@@ -1,0 +1,56 @@
+{
+  "name": "scrubduck",
+  "displayName": "ScrubDuck",
+  "description": "Debug with AI. Scrub the secrets. Local-first code sanitizer.",
+  "version": "1.0.0",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Security",
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:scrubduck.sanitize",
+    "onCommand:scrubduck.restore"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "scrubduck.sanitize",
+        "title": "ScrubDuck: Sanitize Selection"
+      },
+      {
+        "command": "scrubduck.restore",
+        "title": "ScrubDuck: Restore Selection"
+      }
+    ],
+    "configuration": {
+      "title": "ScrubDuck",
+      "properties": {
+        "scrubduck.pythonPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the Python interpreter (e.g., inside your venv)."
+        },
+        "scrubduck.scriptPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the scrubduck.py script."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.80.0",
+    "@types/node": "18.x",
+    "typescript": "^5.1.3"
+  }
+}
