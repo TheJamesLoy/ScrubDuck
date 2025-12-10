@@ -20,7 +20,7 @@ Local Execution: No data is ever sent to a third-party server (other than the LL
 
 ## Clone the repository:
 
-git clone [https://github.com/YOUR_USERNAME/scrubduck.git](https://github.com/YOUR_USERNAME/scrubduck.git)
+git clone [https://github.com/TheJamesLoy/scrubduck.git](https://github.com/TheJamesLoy/scrubduck.git)
 
 cd scrubduck
 
