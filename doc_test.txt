@@ -19,7 +19,6 @@ It looks like a permissions issue with the legacy AWS credentials.
 Here is the raw log dump from the crash:
 
 [09:30:01] [INFO] [PaymentService] Processing payment for user 'jlevinson'.
-[09:30:02] [DEBUG] [StripeAPI] Using Secret Key: sk_live_51Mz92J2k3L4m5N6o7P8q9R0s
 [09:30:02] [ERROR] [StripeAPI] Card declined. Number: 4242 4242 4242 4242 (Exp: 12/28)
 [09:30:03] [WARN] [BackupWorker] Uploading failed transaction log to s3://dm-customer-financial-records
 [09:30:03] [ERROR] [AWS_SDK] AccessDeniedException using Access Key: AKIAIOSFODNN7EXAMPLE
