@@ -1,0 +1,35 @@
+INCIDENT REPORT: Billing System Failure
+DATE: Dec 17, 2025
+REPORTED BY: Michael Scott (michael.scott@dundermifflin.com)
+
+DESCRIPTION:
+We received a critical ticket from a customer, Jan Levinson, regarding a failed transaction.
+She attempted to update her billing information at 9:30 AM EST but received a 500 error.
+
+CUSTOMER DETAILS:
+Name: Jan Levinson
+Email: jan.levinson@whitepages.com
+Phone: 212-555-0199
+Billing Address: 4500 Commerce Parkway, Cleveland, OH 44128
+
+TECHNICAL ANALYSIS:
+I dug into the server logs and found that the application crashed while trying to write to the backup bucket.
+It looks like a permissions issue with the legacy AWS credentials.
+
+Here is the raw log dump from the crash:
+
+[09:30:01] [INFO] [PaymentService] Processing payment for user 'jlevinson'.
+[09:30:02] [DEBUG] [StripeAPI] Using Secret Key: sk_live_51Mz92J2k3L4m5N6o7P8q9R0s
+[09:30:02] [ERROR] [StripeAPI] Card declined. Number: 4242 4242 4242 4242 (Exp: 12/28)
+[09:30:03] [WARN] [BackupWorker] Uploading failed transaction log to s3://dm-customer-financial-records
+[09:30:03] [ERROR] [AWS_SDK] AccessDeniedException using Access Key: AKIAIOSFODNN7EXAMPLE
+[09:30:04] [CRITICAL] [System] Connection lost to database node at 192.168.1.105
+[09:30:04] [INFO] [Auth] Invalid session for user: jan.levinson@whitepages.com. Token: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+
+RECOMMENDED ACTION:
+
+Rotate the exposed AWS key (AKIAIOSFODNN7EXAMPLE).
+
+Contact Jan at 212-555-0199 to retry the payment.
+
+Verify the S3 bucket policies for 'dm-customer-financial-records'.
