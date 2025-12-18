@@ -100,23 +100,39 @@ class CodeVisitor(ast.NodeVisitor):
         self.findings = [] 
         self.suspicious_vars = suspicious_vars
 
-    def _check_and_add(self, node, var_name):
-        if any(s in var_name for s in self.suspicious_vars):
-            if isinstance(node.value, (ast.Constant, ast.Str)):
-                val = node.value.s if hasattr(node.value, 's') else node.value.value
-                if isinstance(val, str) and val:
-                    self.findings.append((node.value, "SECRET_VAR_ASSIGNMENT"))
+    def _add_finding(self, node_value):
+        """Helper to safely extract string value and add to findings."""
+        if isinstance(node_value, (ast.Constant, ast.Str)):
+            val = node_value.s if hasattr(node_value, 's') else node_value.value
+            if isinstance(val, str) and val:
+                self.findings.append((node_value, "SECRET_VAR_ASSIGNMENT"))
 
     def visit_Assign(self, node):
+        """Handles: x = 'secret' AND x['key'] = 'secret'"""
         for target in node.targets:
+            # Case 1: Simple Variable
             if isinstance(target, ast.Name):
-                self._check_and_add(node, target.id.lower())
+                if any(s in target.id.lower() for s in self.suspicious_vars):
+                    self._add_finding(node.value)
+            
+            # Case 2: Subscript Assignment (config['password'] = ...)
             elif isinstance(target, ast.Subscript):
-                slice_val = None
                 if isinstance(target.slice, (ast.Constant, ast.Str)): 
                     slice_val = target.slice.s if hasattr(target.slice, 's') else target.slice.value
-                if isinstance(slice_val, str):
-                    self._check_and_add(node, slice_val.lower())
+                    if isinstance(slice_val, str) and any(s in slice_val.lower() for s in self.suspicious_vars):
+                        self._add_finding(node.value)
+        self.generic_visit(node)
+
+    def visit_Dict(self, node):
+        """
+        Handles Dictionary Literals: { "password": "secret" }
+        This was the missing piece!
+        """
+        for key, value in zip(node.keys, node.values):
+            if isinstance(key, (ast.Constant, ast.Str)):
+                key_val = key.s if hasattr(key, 's') else key.value
+                if isinstance(key_val, str) and any(s in key_val.lower() for s in self.suspicious_vars):
+                    self._add_finding(value)
         self.generic_visit(node)
 
 class ContextAwareSanitizer:
@@ -125,23 +141,19 @@ class ContextAwareSanitizer:
         self.token_map: Dict[str, str] = {}
         self.counters: Dict[str, int] = {}
         
-        # Load Config
         self.config = config or {}
         self.ignore_list = set(self.config.get('ignore', []))
         
-        # Merge Suspicious Vars
         self.suspicious_vars = DEFAULT_SUSPICIOUS_VAR_NAMES.copy()
         if 'suspicious_vars' in self.config:
             self.suspicious_vars.update(self.config['suspicious_vars'])
             
-        # Merge Custom Regex
         self.regex_patterns = DEFAULT_REGEX_PATTERNS.copy()
         if 'custom_rules' in self.config:
             for rule in self.config['custom_rules']:
                 self.regex_patterns[rule['name']] = rule['regex']
-                # Add to priority map dynamically if weight is provided
                 if 'score' in rule:
-                    PRIORITY_MAP[rule['name']] = rule['score'] + 50 # Base boost
+                    PRIORITY_MAP[rule['name']] = rule['score'] + 50 
 
     def _get_placeholder(self, entity_type: str) -> str:
         if entity_type not in self.counters: self.counters[entity_type] = 0
@@ -153,7 +165,6 @@ class ContextAwareSanitizer:
         try:
             clean_text = textwrap.dedent(text)
             tree = ast.parse(clean_text)
-            # Pass dynamic suspicious vars to visitor
             visitor = CodeVisitor(self.suspicious_vars)
             visitor.visit(tree)
             
@@ -165,6 +176,7 @@ class ContextAwareSanitizer:
                     if idx == -1: break
                     findings.append((idx, idx + len(val), label))
                     start = idx + len(val)
+                # Fallback for multiline
                 if start == 0 and '\n' in val:
                     prefix = val[:20]
                     idx = text.find(prefix)
@@ -189,7 +201,7 @@ class ContextAwareSanitizer:
                 if any(char.isdigit() for char in entity_text): continue
             findings.append((r.start, r.end, r.entity_type))
 
-        # 2. Regex (Includes Custom Rules)
+        # 2. Regex
         for label, pattern in self.regex_patterns.items():
             for match in re.finditer(pattern, text):
                 findings.append((match.start(), match.end(), label))
@@ -200,12 +212,11 @@ class ContextAwareSanitizer:
         # 4. AST
         findings.extend(self._analyze_ast(text))
 
-        # FILTER: Remove findings that match the Allow-List
+        # Filter Ignore List
         filtered_findings = []
         for start, end, label in findings:
             snippet = text[start:end]
-            if snippet in self.ignore_list:
-                continue
+            if snippet in self.ignore_list: continue
             filtered_findings.append((start, end, label))
 
         filtered_findings.sort(key=lambda x: (x[0], PRIORITY_MAP.get(x[2], 0)), reverse=True)
@@ -245,8 +256,6 @@ if __name__ == "__main__":
     parser.add_argument("--map", help="JSON string of token map")
     
     args = parser.parse_args()
-    
-    # LOAD CONFIG AUTOMATICALLY
     config = load_config()
     sanitizer = ContextAwareSanitizer(config=config)
 

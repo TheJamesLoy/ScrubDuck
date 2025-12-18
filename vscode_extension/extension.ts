@@ -7,7 +7,7 @@ let globalSecretMap: any = {};
 
 export function activate(context: vscode.ExtensionContext) {
 
-    console.log('ScrubDuck is active!');
+    console.log('ScrubDuck is active! 🦆');
 
     let sanitizeDisposable = vscode.commands.registerCommand('scrubduck.sanitize', async () => {
         await handleCommand('sanitize_json');
@@ -27,23 +27,24 @@ async function handleCommand(mode: string) {
 
     const selection = editor.selection;
     const text = editor.document.getText(selection);
+    
+    // Pass the actual filename so the CLI knows if it's Python or JSON
+    const filePathArg = editor.document.fileName;
 
     if (!text) { vscode.window.showWarningMessage('No text selected!'); return; }
 
     // --- CONFIGURATION LOADING ---
     const config = vscode.workspace.getConfiguration('scrubduck');
-    
-    // 1. Get paths from User Settings
     let scriptPath = config.get<string>('scriptPath');
     let pythonPath = config.get<string>('pythonPath');
 
-    // 2. Check if settings are missing
+    // Auto-detect defaults (Development Mode)
     if (!scriptPath || !pythonPath) {
-        // Try to guess defaults if we are running inside the source repo (Development Mode)
         if (vscode.workspace.workspaceFolders) {
             const root = vscode.workspace.workspaceFolders[0].uri.fsPath;
-            if (!scriptPath && fs.existsSync(path.join(root, 'scrubduck.py'))) {
-                scriptPath = path.join(root, 'scrubduck.py');
+            // PREFER scrubduck_score.py as the entry point now!
+            if (!scriptPath && fs.existsSync(path.join(root, 'scrubduck_score.py'))) {
+                scriptPath = path.join(root, 'scrubduck_score.py');
             }
             if (!pythonPath && fs.existsSync(path.join(root, 'venv', 'bin', 'python'))) {
                 pythonPath = path.join(root, 'venv', 'bin', 'python');
@@ -51,30 +52,20 @@ async function handleCommand(mode: string) {
         }
     }
 
-    // 3. If still missing, stop and alert user
     if (!scriptPath || !pythonPath) {
-        const action = "Open Settings";
-        vscode.window.showErrorMessage(
-            "ScrubDuck is not configured. Please set 'scrubduck.scriptPath' and 'scrubduck.pythonPath'.",
-            action
-        ).then(selection => {
-            if (selection === action) {
-                vscode.commands.executeCommand('workbench.action.openSettings', 'ScrubDuck');
-            }
-        });
+        vscode.window.showErrorMessage("ScrubDuck not configured. Set paths in Settings.");
         return;
     }
 
-    // --- EXECUTION ---
     try {
         const mapArgs = mode === 'restore_json' ? JSON.stringify(globalSecretMap) : null;
         
         if (mode === 'restore_json' && Object.keys(globalSecretMap).length === 0) {
-            vscode.window.showErrorMessage('No secrets found in memory. Sanitize first!');
+            vscode.window.showErrorMessage('No secrets found in memory. Scrub first!');
             return;
         }
 
-        const result = await runPythonScript(pythonPath, scriptPath, mode, text, mapArgs);
+        const result = await runPythonScript(pythonPath, scriptPath, mode, text, mapArgs, filePathArg);
         
         if (result.text) {
             editor.edit(editBuilder => {
@@ -83,20 +74,20 @@ async function handleCommand(mode: string) {
             
             if (result.map) {
                 globalSecretMap = result.map;
-                vscode.window.showInformationMessage('Sanitized!');
+                vscode.window.showInformationMessage(`Scrubbed using ${result.engine || 'Default'} Engine!`);
             } else if (mode === 'restore_json') {
                 vscode.window.showInformationMessage('Restored!');
             }
         }
     } catch (err: any) {
         console.error('Execution Error:', err);
-        vscode.window.showErrorMessage('Error: ' + err);
+        vscode.window.showErrorMessage('ScrubDuck Error: ' + err);
     }
 }
 
-function runPythonScript(pythonPath: string, scriptPath: string, mode: string, stdin: string, mapArgs: string | null): Promise<any> {
+function runPythonScript(pythonPath: string, scriptPath: string, mode: string, stdin: string, mapArgs: string | null, filePathArg: string): Promise<any> {
     return new Promise((resolve, reject) => {
-        let args = [scriptPath, '--mode', mode];
+        let args = [scriptPath, '--mode', mode, '--filepath', filePathArg];
         if (mapArgs) args.push('--map', mapArgs);
 
         console.log(`Spawning: ${pythonPath} ${args.join(' ')}`);
@@ -106,26 +97,19 @@ function runPythonScript(pythonPath: string, scriptPath: string, mode: string, s
         let stderrData = '';
 
         process.stdout.on('data', (data: Buffer) => { stdoutData += data.toString(); });
-        process.stderr.on('data', (data: Buffer) => { 
-            stderrData += data.toString();
-            console.log(`STDERR: ${data.toString()}`); 
-        });
+        process.stderr.on('data', (data: Buffer) => { stderrData += data.toString(); });
 
         process.stdin.write(stdin);
         process.stdin.end();
 
-        process.on('error', (err) => {
-            reject(`Failed to start python process: ${err.message}`);
-        });
-
         process.on('close', (code: number) => {
             if (code !== 0) {
-                reject(`Python failed (Code ${code}). Check Debug Console.`);
+                console.error(stderrData);
+                reject(`Python failed. Check Debug Console.`);
             } else {
                 try {
                     resolve(JSON.parse(stdoutData));
                 } catch (e) {
-                    console.log(`Raw Output: ${stdoutData}`);
                     reject("Invalid JSON output from Python");
                 }
             }

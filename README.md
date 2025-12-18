@@ -64,10 +64,10 @@ Not sure if a file is safe? Run a scan to get a Risk Report without modifying th
 python scrubduck_score.py server_logs.txt --dry-run
 
 ### For Python Code (Bi-directional)
-python scrubduck_cli.py my_script.py --scrub
+python scrubduck_score.py my_script.py --scrub
 
 ### For Logs/PDFs (Unidirectional)
-python scrubduck_cli.py error.log --scrub
+python scrubduck_score.py error.log --scrub
 
 ### To clean a specific code file without score:
 
