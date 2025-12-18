@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-ScrubDuck - Context Aware Sanitizer
+AI Firewall - Context Aware Sanitizer
 =====================================
 A tool to detect and redact sensitive information (API keys, PII, passwords) 
 from source code before sending it to Large Language Models (LLMs), 
 and restore them in the response.
 
-Author: ScrubDuck Contributors
+Author: AI Firewall Contributors
 License: MIT
 """
 
@@ -160,9 +160,11 @@ class ContextAwareSanitizer:
             pass
         return findings
 
-    def sanitize(self, text: str) -> str:
-        self.token_map = {}
-        self.counters = {}
+    def scan_only(self, text: str) -> List[Tuple[int, int, str]]:
+        """
+        Runs all scanners and returns a raw list of findings.
+        Returns: List of (start_index, end_index, label)
+        """
         findings = []
         
         # 1. Presidio
@@ -185,8 +187,16 @@ class ContextAwareSanitizer:
         # 4. AST
         findings.extend(self._analyze_ast(text))
 
-        # Conflict Resolution
+        # Conflict Resolution: Sort by Priority + Position
         findings.sort(key=lambda x: (x[0], PRIORITY_MAP.get(x[2], 0)), reverse=True)
+        return findings
+
+    def sanitize(self, text: str) -> str:
+        self.token_map = {}
+        self.counters = {}
+        
+        # Use shared scan logic
+        findings = self.scan_only(text)
         
         sanitized_text = text
         processed_indices: Set[int] = set()
@@ -213,13 +223,25 @@ class ContextAwareSanitizer:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("file", nargs="?", help="File to process")
-    parser.add_argument("--mode", choices=["sanitize_json", "restore_json"], help="JSON mode for VS Code")
+    parser.add_argument("--mode", choices=["sanitize_json", "restore_json", "scan_only"], help="Mode")
     parser.add_argument("--map", help="JSON string of token map (for restore mode)")
     
     args = parser.parse_args()
     sanitizer = ContextAwareSanitizer()
 
-    if args.mode == "sanitize_json":
+    if args.mode == "scan_only":
+        # New mode for dry-run
+        try:
+            input_text = sys.stdin.read()
+            findings = sanitizer.scan_only(input_text)
+            # Return list of findings as JSON
+            results = [{"label": f[2], "start": f[0], "end": f[1], "snippet": input_text[f[0]:f[1]]} for f in findings]
+            print(json.dumps(results))
+        except Exception as e:
+            sys.stderr.write(str(e))
+            sys.exit(1)
+
+    elif args.mode == "sanitize_json":
         try:
             input_text = sys.stdin.read()
             clean_text = sanitizer.sanitize(input_text)

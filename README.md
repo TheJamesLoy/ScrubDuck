@@ -4,6 +4,12 @@ ScrubDuck is a local-first security tool that acts as an "AI Airlock." It strips
 
 # ✨ Features
 
+## 🌎 Global
+
+Risk Assessment: Runs a "Dry Run" on your files to calculate a Risk Score (Low/Med/Critical) before you touch the data.
+
+
+
 ## 🐍 Code Sanitizer (For Source Code)
 
 Context-Aware: Detects secrets based on variable names (AST Parsing), not just regex.
