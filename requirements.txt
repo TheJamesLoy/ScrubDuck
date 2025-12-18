@@ -2,6 +2,7 @@ presidio-analyzer
 presidio-anonymizer
 spacy
 pypdf
+PyYAML
 
 # Note: After installing, you must run:
 # python -m spacy download en_core_web_lg

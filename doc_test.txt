@@ -11,6 +11,7 @@ Name: Jan Levinson
 Email: jan.levinson@whitepages.com
 Phone: 212-555-0199
 Billing Address: 4500 Commerce Parkway, Cleveland, OH 44128
+Home Address: 123 Main St, Bloomington, IL, 61704
 
 TECHNICAL ANALYSIS:
 I dug into the server logs and found that the application crashed while trying to write to the backup bucket.

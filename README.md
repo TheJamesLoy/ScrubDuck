@@ -1,6 +1,6 @@
 # 🦆 ScrubDuck 
 
-ScrubDuck is a local-first security tool that acts as an "AI Airlock." It strips sensitive data (API keys, PII, passwords, customer info) from your source code, server logs, and documents so you can safely use LLMs for debugging and analysis without leaking proprietary secrets.
+ScrubDuck is a local-first security tool that strips sensitive data (API keys, PII, passwords, customer info) from your source code, server logs, and documents so you can safely use LLMs for debugging and analysis without leaking proprietary secrets or sensitive information.
 
 # ✨ Features
 
@@ -8,9 +8,11 @@ ScrubDuck is a local-first security tool that acts as an "AI Airlock." It strips
 
 Risk Assessment: Runs a "Dry Run" on your files to calculate a Risk Score (Low/Med/Critical) before you touch the data.
 
+Configurable: Define your own allow-lists and custom regex rules via .scrubduck.yaml.
 
 
-## 🐍 Code Sanitizer (For Source Code)
+
+## 🧼 Code Scrubber (For Source Code)
 
 Context-Aware: Detects secrets based on variable names (AST Parsing), not just regex.
 
@@ -55,7 +57,19 @@ python -m spacy download en_core_web_lg
 
 ## CLI Mode
 
-### To clean a specific code file:
+### Risk Assessment (Dry Run)
+
+Not sure if a file is safe? Run a scan to get a Risk Report without modifying the file:
+
+python scrubduck_score.py server_logs.txt --dry-run
+
+### For Python Code (Bi-directional)
+python scrubduck_cli.py my_script.py --scrub
+
+### For Logs/PDFs (Unidirectional)
+python scrubduck_cli.py error.log --scrub
+
+### To clean a specific code file without score:
 
 python scrubduck.py my_dirty_code.py
 
@@ -68,9 +82,13 @@ Paste LLM's response back into the terminal.
 
 The tool will output the [RESTORED] code with your secrets injected back in.
 
-### To clean a specific document/log:
+### To clean a specific document/log without score:
 
-python doc_ducky.py my_dirty_doc.py
+python doc_ducky.py my_dirty_doc.txt
+
+## ⚙️ Configuration (.scrubduck.yaml)
+
+You can customize what ScrubDuck ignores or flags by updating the .scrubduck.yaml file in your project root or home directory.
 
 ## VS Code Extension
 

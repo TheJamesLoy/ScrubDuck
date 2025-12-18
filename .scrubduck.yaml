@@ -1,0 +1,33 @@
+# ScrubDuck Configuration
+# Place this file in your project root.
+
+# 1. Allow-List (Ignore specific secrets or variables)
+# ScrubDuck will skip these exact strings or variable names.
+ignore:
+  - "public_client_id"
+  - "localhost"
+  - "127.0.0.1"
+  - "marketing_email@example.com"
+  - "123 Main St"
+  - "Main St"         # <--- Add this: The NLP engine sees this as a separate entity
+  - "Bloomington"     # <--- Add the city if you want it ignored
+  - "IL"              # <--- Add the state
+  - "61704"           # <--- Add the zip
+
+# 2. Custom Regex Rules
+# Add your own patterns to catch company-specific secrets.
+custom_rules:
+  - name: "COMPANY_PROJECT_ID"
+    regex: "PROJ-[0-9]{4}-[A-Z]{3}"
+    score: 40  # Risk score weight (1-100)
+
+  - name: "INTERNAL_SERVER_NAME"
+    regex: "srv-[a-z]{3}-[0-9]{3}"
+    score: 20
+
+# 3. Extend Suspicious Variable List (For Code Scanner)
+# If a variable name contains these words, its value will be redacted.
+suspicious_vars:
+  - "ftp_pass"
+  - "azure_secret"
+  - "bot_token"

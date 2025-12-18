@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-AI Firewall - Context Aware Sanitizer
+ScrubDuck - Context Aware Scrubber
 =====================================
 A tool to detect and redact sensitive information (API keys, PII, passwords) 
 from source code before sending it to Large Language Models (LLMs), 
 and restore them in the response.
 
-Author: AI Firewall Contributors
+Author: ScrubDuck Contributors
 License: MIT
 """
 
@@ -17,23 +17,24 @@ import textwrap
 import argparse
 import sys
 import json
-from typing import List, Tuple, Dict, Set
+import os
+import yaml
+from typing import List, Tuple, Dict, Set, Optional
 from presidio_analyzer import AnalyzerEngine
 
 # ==========================================
-#              CONFIGURATION
+#              DEFAULTS
 # ==========================================
 
-SUSPICIOUS_VAR_NAMES = {
+DEFAULT_SUSPICIOUS_VAR_NAMES = {
     "password", "secret", "key", "token", "auth", "credential", 
     "pwd", "api_key", "access_key", "client_secret", "private", 
     "cert", "ssh"
 }
 
-REGEX_PATTERNS = {
+DEFAULT_REGEX_PATTERNS = {
     "AWS_KEY": r"(?<![A-Z0-9])[A-Z0-9]{20}(?![A-Z0-9])", 
     "IPV4": r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b",
-    # Added IPv6 Support
     "IPV6": r"([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)"
 }
 
@@ -53,6 +54,23 @@ ENTROPY_THRESHOLD = 3.2
 #              CORE LOGIC
 # ==========================================
 
+def load_config() -> Dict:
+    """Loads .scrubduck.yaml from current directory or home directory."""
+    paths = [
+        os.path.join(os.getcwd(), '.scrubduck.yaml'),
+        os.path.join(os.path.expanduser("~"), '.scrubduck.yaml')
+    ]
+    
+    for p in paths:
+        if os.path.exists(p):
+            try:
+                with open(p, 'r') as f:
+                    config = yaml.safe_load(f)
+                    return config or {}
+            except Exception as e:
+                sys.stderr.write(f"⚠️ Error loading config {p}: {e}\n")
+    return {}
+
 class EntropyScanner:
     @staticmethod
     def calculate_entropy(data: str) -> float:
@@ -67,7 +85,6 @@ class EntropyScanner:
     @staticmethod
     def scan(text: str) -> List[Tuple[int, int, str]]:
         findings = []
-        # Excludes common code delimiters to isolate tokens
         for match in re.finditer(r'[^\s"\'\(\)\{\}\[\]=,;:\\]+', text):
             token = match.group()
             if len(token) < 8: continue 
@@ -79,12 +96,12 @@ class EntropyScanner:
         return findings
 
 class CodeVisitor(ast.NodeVisitor):
-    def __init__(self):
+    def __init__(self, suspicious_vars: Set[str]):
         self.findings = [] 
+        self.suspicious_vars = suspicious_vars
 
     def _check_and_add(self, node, var_name):
-        """Helper to check if a name/value pair is suspicious."""
-        if any(s in var_name for s in SUSPICIOUS_VAR_NAMES):
+        if any(s in var_name for s in self.suspicious_vars):
             if isinstance(node.value, (ast.Constant, ast.Str)):
                 val = node.value.s if hasattr(node.value, 's') else node.value.value
                 if isinstance(val, str) and val:
@@ -92,28 +109,39 @@ class CodeVisitor(ast.NodeVisitor):
 
     def visit_Assign(self, node):
         for target in node.targets:
-            # Case 1: Simple Variable (db_password = "...")
             if isinstance(target, ast.Name):
                 self._check_and_add(node, target.id.lower())
-            
-            # Case 2: Dictionary Key (config['api_key'] = "...")
             elif isinstance(target, ast.Subscript):
-                # Try to get the key name
                 slice_val = None
                 if isinstance(target.slice, (ast.Constant, ast.Str)): 
                     slice_val = target.slice.s if hasattr(target.slice, 's') else target.slice.value
-                
-                # Check if key contains 'key', 'secret', etc.
                 if isinstance(slice_val, str):
                     self._check_and_add(node, slice_val.lower())
-        
         self.generic_visit(node)
 
 class ContextAwareSanitizer:
-    def __init__(self):
+    def __init__(self, config: Optional[Dict] = None):
         self.analyzer = AnalyzerEngine()
         self.token_map: Dict[str, str] = {}
         self.counters: Dict[str, int] = {}
+        
+        # Load Config
+        self.config = config or {}
+        self.ignore_list = set(self.config.get('ignore', []))
+        
+        # Merge Suspicious Vars
+        self.suspicious_vars = DEFAULT_SUSPICIOUS_VAR_NAMES.copy()
+        if 'suspicious_vars' in self.config:
+            self.suspicious_vars.update(self.config['suspicious_vars'])
+            
+        # Merge Custom Regex
+        self.regex_patterns = DEFAULT_REGEX_PATTERNS.copy()
+        if 'custom_rules' in self.config:
+            for rule in self.config['custom_rules']:
+                self.regex_patterns[rule['name']] = rule['regex']
+                # Add to priority map dynamically if weight is provided
+                if 'score' in rule:
+                    PRIORITY_MAP[rule['name']] = rule['score'] + 50 # Base boost
 
     def _get_placeholder(self, entity_type: str) -> str:
         if entity_type not in self.counters: self.counters[entity_type] = 0
@@ -123,48 +151,33 @@ class ContextAwareSanitizer:
     def _analyze_ast(self, text: str) -> List[Tuple[int, int, str]]:
         findings = []
         try:
-            # We dedent to help AST parse indented code blocks
             clean_text = textwrap.dedent(text)
             tree = ast.parse(clean_text)
-            visitor = CodeVisitor()
+            # Pass dynamic suspicious vars to visitor
+            visitor = CodeVisitor(self.suspicious_vars)
             visitor.visit(tree)
             
             for node, label in visitor.findings:
                 val = node.s if hasattr(node, 's') else node.value
-                
-                # STRING FINDER STRATEGY
-                # 1. Try exact match
                 start = 0
                 while True:
                     idx = text.find(val, start)
                     if idx == -1: break
                     findings.append((idx, idx + len(val), label))
                     start = idx + len(val)
-                
-                # 2. Fallback for Multiline Strings (SSH Keys)
-                # If exact match fails (due to indentation diffs), try stripping whitespace
                 if start == 0 and '\n' in val:
-                    # Very basic fuzzy match: try to find the first 20 chars
                     prefix = val[:20]
                     idx = text.find(prefix)
                     if idx != -1:
-                        # If found, try to extend until we hit the end of the real string in text
-                        # This is a heuristic approximation
-                        # We calculate approx length including indentation
                         end_val_suffix = val[-20:]
                         end_idx = text.find(end_val_suffix, idx)
                         if end_idx != -1:
                              findings.append((idx, end_idx + 20, label))
-
         except:
             pass
         return findings
 
     def scan_only(self, text: str) -> List[Tuple[int, int, str]]:
-        """
-        Runs all scanners and returns a raw list of findings.
-        Returns: List of (start_index, end_index, label)
-        """
         findings = []
         
         # 1. Presidio
@@ -176,8 +189,8 @@ class ContextAwareSanitizer:
                 if any(char.isdigit() for char in entity_text): continue
             findings.append((r.start, r.end, r.entity_type))
 
-        # 2. Regex
-        for label, pattern in REGEX_PATTERNS.items():
+        # 2. Regex (Includes Custom Rules)
+        for label, pattern in self.regex_patterns.items():
             for match in re.finditer(pattern, text):
                 findings.append((match.start(), match.end(), label))
 
@@ -187,15 +200,20 @@ class ContextAwareSanitizer:
         # 4. AST
         findings.extend(self._analyze_ast(text))
 
-        # Conflict Resolution: Sort by Priority + Position
-        findings.sort(key=lambda x: (x[0], PRIORITY_MAP.get(x[2], 0)), reverse=True)
-        return findings
+        # FILTER: Remove findings that match the Allow-List
+        filtered_findings = []
+        for start, end, label in findings:
+            snippet = text[start:end]
+            if snippet in self.ignore_list:
+                continue
+            filtered_findings.append((start, end, label))
+
+        filtered_findings.sort(key=lambda x: (x[0], PRIORITY_MAP.get(x[2], 0)), reverse=True)
+        return filtered_findings
 
     def sanitize(self, text: str) -> str:
         self.token_map = {}
         self.counters = {}
-        
-        # Use shared scan logic
         findings = self.scan_only(text)
         
         sanitized_text = text
@@ -224,17 +242,18 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("file", nargs="?", help="File to process")
     parser.add_argument("--mode", choices=["sanitize_json", "restore_json", "scan_only"], help="Mode")
-    parser.add_argument("--map", help="JSON string of token map (for restore mode)")
+    parser.add_argument("--map", help="JSON string of token map")
     
     args = parser.parse_args()
-    sanitizer = ContextAwareSanitizer()
+    
+    # LOAD CONFIG AUTOMATICALLY
+    config = load_config()
+    sanitizer = ContextAwareSanitizer(config=config)
 
     if args.mode == "scan_only":
-        # New mode for dry-run
         try:
             input_text = sys.stdin.read()
             findings = sanitizer.scan_only(input_text)
-            # Return list of findings as JSON
             results = [{"label": f[2], "start": f[0], "end": f[1], "snippet": input_text[f[0]:f[1]]} for f in findings]
             print(json.dumps(results))
         except Exception as e:

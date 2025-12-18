@@ -1,8 +1,8 @@
 {
   "name": "scrubduck",
   "displayName": "ScrubDuck",
-  "description": "Debug with AI. Scrub the secrets. Local-first code sanitizer.",
-  "version": "1.0.0",
+  "description": "Debug with AI. Scrub the secrets. Local-first code scrubber.",
+  "version": "2.0.0",
   "license": "MIT",
   "engines": {
     "vscode": "^1.80.0"

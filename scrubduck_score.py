@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ScrubDuck CLI - The Unified Entry Point
+ScrubDuck Score - The Unified Entry Point
 =======================================
 Orchestrates the Code Engine (AST) and Data Engine (Regex/NLP) 
 to provide a Risk Assessment and Sanitization workflow.
@@ -14,9 +14,9 @@ import argparse
 import sys
 import json
 import os
+import yaml
 from typing import List, Dict, Tuple
 
-# Import engines
 try:
     import scrubduck
     import doc_ducky
@@ -26,18 +26,37 @@ except ImportError:
 
 class ScrubDuckCLI:
     def __init__(self):
-        self.code_engine = scrubduck.ContextAwareSanitizer()
-        self.doc_engine = doc_ducky.DocScrubber()
+        self.config = self.load_config()
+        # Initialize engines WITH config
+        self.code_engine = scrubduck.ContextAwareSanitizer(config=self.config)
+        self.doc_engine = doc_ducky.DocScrubber(config=self.config)
+
+    def load_config(self) -> Dict:
+        """Loads .scrubduck.yaml from current directory or home directory."""
+        paths = [
+            os.path.join(os.getcwd(), '.scrubduck.yaml'),
+            os.path.join(os.path.expanduser("~"), '.scrubduck.yaml')
+        ]
+        
+        for p in paths:
+            if os.path.exists(p):
+                try:
+                    with open(p, 'r') as f:
+                        config = yaml.safe_load(f)
+                        print(f"🦆 Loaded configuration from: {p}")
+                        return config or {}
+                except Exception as e:
+                    print(f"⚠️ Error loading config {p}: {e}")
+        
+        return {}
 
     def detect_type(self, filepath: str) -> str:
-        """Determines if the file is 'code' or 'document'."""
         ext = os.path.splitext(filepath)[1].lower()
         if ext in ['.py']:
             return 'CODE'
         return 'DOC'
 
     def calculate_risk(self, findings: List[Dict]) -> Tuple[str, int]:
-        """Calculates a Risk Score (0-100) and Label based on findings."""
         score = 0
         weights = {
             "AWS_KEY": 50,
@@ -52,13 +71,17 @@ class ScrubDuckCLI:
             "IPV4": 5,
             "LOCATION": 5
         }
+        
+        # Add weights for custom rules if present
+        if 'custom_rules' in self.config:
+            for rule in self.config['custom_rules']:
+                if 'score' in rule:
+                    weights[rule['name']] = rule['score']
 
         for f in findings:
-            # Handle list vs dict structure from different engines
             label = f.get('label') if isinstance(f, dict) else f[2]
             score += weights.get(label, 5)
 
-        # Normalize Score
         if score == 0: return "SAFE", 0
         if score < 20: return "LOW", score
         if score < 50: return "MEDIUM", score
@@ -66,7 +89,6 @@ class ScrubDuckCLI:
         return "CRITICAL", score
 
     def run_analysis(self, filepath: str):
-        """Runs a Dry Run analysis and prints a report."""
         file_type = self.detect_type(filepath)
         print(f"\n🦆 ScrubDuck Analysis: {filepath} [{file_type} Mode]")
         print("=" * 60)
@@ -77,26 +99,19 @@ class ScrubDuckCLI:
                 content = f.read()
 
             if file_type == 'CODE':
-                # Code engine returns tuples: (start, end, label)
                 raw_findings = self.code_engine.scan_only(content)
-                # Normalize to dicts
                 findings = [{"label": f[2], "snippet": content[f[0]:f[1]]} for f in raw_findings]
             else:
-                # Doc engine handles PDF extraction internally if needed
                 if filepath.endswith('.pdf'):
                     content = self.doc_engine.extract_text(filepath)
-                
-                # Doc engine returns dicts: {label, snippet, ...}
                 findings = self.doc_engine.scan_only(content)
 
         except Exception as e:
             print(f"Error reading file: {e}")
             return
 
-        # Generate Report
         risk_label, risk_score = self.calculate_risk(findings)
         
-        # Color codes (if supported)
         RED = "\033[91m"
         GREEN = "\033[92m"
         RESET = "\033[0m"
@@ -108,7 +123,7 @@ class ScrubDuckCLI:
         if len(findings) > 0:
             print(f"{'TYPE':<25} | {'CONTENT (Truncated)':<30}")
             print("-" * 60)
-            for f in findings[:10]: # Show top 10
+            for f in findings[:10]: 
                 label = f['label']
                 snippet = f['snippet'].replace('\n', ' ').strip()
                 if len(snippet) > 27: snippet = snippet[:27] + "..."
@@ -120,24 +135,19 @@ class ScrubDuckCLI:
             print("No sensitive data found. This file looks safe! ✅")
         
         print("\nTo sanitize this file, run:")
-        print(f"  python scrubduck_cli.py {filepath} --scrub")
+        print(f"  python scrubduck_score.py {filepath} --scrub")
 
     def run_scrub(self, filepath: str, output_path: str = None):
-        """Runs the actual sanitization."""
         file_type = self.detect_type(filepath)
         
-        # Logic to call the correct engine's sanitize/scrub method
-        # (Reusing existing CLI logic via subprocess or direct call)
-        # For MVP, we point the user to the specific script
         if file_type == 'CODE':
-            print(f"Running Code Sanitizer on {filepath}...")
-            # Direct call to engine
+            print(f"Running ScrubDuck on {filepath}...")
             with open(filepath, 'r') as f: content = f.read()
             clean = self.code_engine.sanitize(content)
             print("\n[SANITIZED OUTPUT]\n")
             print(clean)
         else:
-            print(f"Running Doc Scrubber on {filepath}...")
+            print(f"Running Doc Ducky on {filepath}...")
             content = self.doc_engine.extract_text(filepath)
             clean = self.doc_engine.scrub(content)
             print("\n[SCRUBBED OUTPUT]\n")
@@ -157,5 +167,4 @@ if __name__ == "__main__":
     elif args.scrub:
         cli.run_scrub(args.file)
     else:
-        # Default behavior: Dry Run
         cli.run_analysis(args.file)
